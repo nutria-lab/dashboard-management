@@ -1,0 +1,5 @@
+model Student {
+  id          String       @id
+  name        String
+  attendances Attendance[]
+}

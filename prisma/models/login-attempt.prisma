@@ -1,0 +1,8 @@
+model LoginAttempt {
+  keyHash         String   @id
+  attemptCount    Int
+  windowStartedAt DateTime @db.Timestamptz(6)
+  expiresAt       DateTime @db.Timestamptz(6)
+
+  @@index([expiresAt])
+}

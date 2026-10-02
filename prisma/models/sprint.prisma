@@ -1,0 +1,5 @@
+model Sprint {
+  id       String         @id
+  name     String
+  sessions ClassSession[]
+}

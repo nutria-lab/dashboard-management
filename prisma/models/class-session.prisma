@@ -1,0 +1,18 @@
+enum SessionType {
+  REGULAR
+  PLANNING
+  REVIEW
+  STEERING
+}
+
+model ClassSession {
+  id          String       @id @default(cuid())
+  date        DateTime     @db.Date
+  type        SessionType
+  sprintId    String
+  sprint      Sprint       @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  attendances Attendance[]
+
+  @@unique([sprintId, date, type])
+  @@index([sprintId, date])
+}
