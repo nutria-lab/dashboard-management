@@ -1,0 +1,24 @@
+model LinearTask {
+  id              String   @id
+  identifier      String
+  title           String
+  url             String
+  teamId          String
+  sprintId        String?
+  assigneeId      String?
+  assigneeName    String?
+  stateId         String
+  stateName       String
+  stateType       String
+  dueDate         String?
+  linearUpdatedAt DateTime
+  completedAt     DateTime?
+  deliveryFrozen  Boolean  @default(false)
+  removed         Boolean  @default(false)
+  detailPending   Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+
+  @@index([teamId])
+  @@index([sprintId])
+  @@index([deliveryFrozen])
+}

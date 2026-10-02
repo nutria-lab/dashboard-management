@@ -1,4 +1,9 @@
-import type { Attendance, Deliveries, Sprint } from "../shared/types.js";
+import type {
+  Attendance,
+  Deliveries,
+  Sprint,
+  TaskJustification,
+} from "../shared/types.js";
 export const demoSprints: Sprint[] = [
   {
     id: "demo-2",
@@ -39,13 +44,15 @@ export function demoDeliveries(sprintId: string): Deliveries {
     keys.forEach((bucket, k) => {
       for (let j = 0; j < values[i][k]; j++)
         issues.push({
-          id: `${i}-${k}-${j}`,
+          id: `00000000-0000-4000-8000-${String(issues.length + 1).padStart(12, "0")}`,
           identifier: `DEMO-${issues.length + 1}`,
           title: "Illustrative task — demo data",
           url: "https://linear.app",
           studentId: `demo-${i}`,
           studentName: name,
           deliveredAt: `2026-09-${[24, 25, 27, 30][k]}T18:00:00Z`,
+          status: "Done",
+          pending: false,
           dueDate: "2026-09-23",
           daysLate: [1, 2, 4, 7][k],
           bucket,
@@ -53,8 +60,9 @@ export function demoDeliveries(sprintId: string): Deliveries {
     });
     return { id: `demo-${i}`, name, counts };
   });
-  return { students, issues, incomplete: [] };
+  return { students, issues, incomplete: [], justified: [] };
 }
+export const demoJustifications = new Map<string, TaskJustification>();
 const stores = new Map<string, Attendance>();
 export function demoAttendance(sprintId: string) {
   if (!stores.has(sprintId))

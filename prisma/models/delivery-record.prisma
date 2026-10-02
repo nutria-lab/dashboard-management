@@ -1,0 +1,11 @@
+model DeliveryRecord {
+  issueId          String    @id
+  deliveredAt      DateTime?
+  dueDate          String?
+  studentId        String?
+  studentName      String?
+  sprintId         String?
+  incompleteReason String?
+
+  @@index([sprintId])
+}

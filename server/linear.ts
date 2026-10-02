@@ -1,53 +1,10 @@
-import {
-  LinearClient,
-  PaginationOrderBy,
-  type Issue,
-  type IssueHistory,
-  type User,
-} from "@linear/sdk";
-
-const DEFAULT_TEAM_ID = "1334836d-3538-443b-a490-524d01b39f85";
-const DEFAULT_REVIEW_STATE_ID = "fbe5afc8-b5e0-49b8-a35c-7df803ee0472";
-const PAGE_SIZE = 100;
-const HISTORY_CONCURRENCY = 8;
 const BUENOS_AIRES_TIME_ZONE = "America/Argentina/Buenos_Aires";
-
-export interface Sprint {
-  id: string;
-  name: string;
-  startsAt: string;
-  endsAt: string;
-}
 
 export interface DeliveryCounts {
   one: number;
   twoThree: number;
   fourFive: number;
   overFive: number;
-}
-
-export interface StudentDeliverySummary {
-  id: string;
-  name: string;
-  counts: DeliveryCounts;
-}
-
-export interface DeliveryIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  url: string;
-  studentId: string;
-  studentName: string;
-  deliveredAt: string;
-  dueDate: string;
-  daysLate: number;
-  bucket: LateBucket;
-}
-
-export interface IncompleteDelivery {
-  identifier: string;
-  reason: string;
 }
 
 export interface DeliverySnapshot {
@@ -81,7 +38,9 @@ export interface PagedConnection<T> {
   fetchNext(): Promise<unknown>;
 }
 
-export function parseStudentAllowlist(value: string | undefined | null): Set<string> {
+export function parseStudentAllowlist(
+  value: string | undefined | null,
+): Set<string> {
   return new Set(
     (value ?? "")
       .split(",")
@@ -90,33 +49,11 @@ export function parseStudentAllowlist(value: string | undefined | null): Set<str
   );
 }
 
-export function isStudentAllowed(id: string, allowlist: ReadonlySet<string>): boolean {
+export function isStudentAllowed(
+  id: string,
+  allowlist: ReadonlySet<string>,
+): boolean {
   return allowlist.size === 0 || allowlist.has(id.trim().toLowerCase());
-}
-
-let cachedClient: LinearClient | undefined;
-let cachedApiKey: string | undefined;
-
-function getLinearClient(): LinearClient {
-  const apiKey = process.env.LINEAR_API_KEY;
-  if (!apiKey) {
-    throw new Error("Set LINEAR_API_KEY on the server.");
-  }
-
-  if (!cachedClient || cachedApiKey !== apiKey) {
-    cachedClient = new LinearClient({ apiKey });
-    cachedApiKey = apiKey;
-  }
-
-  return cachedClient;
-}
-
-function getTeamId(): string {
-  return process.env.LINEAR_TEAM_ID?.trim() || DEFAULT_TEAM_ID;
-}
-
-function getReviewStateId(): string {
-  return process.env.LINEAR_REVIEW_STATE_ID?.trim() || DEFAULT_REVIEW_STATE_ID;
 }
 
 export async function collectAllPages<T>(
@@ -137,29 +74,6 @@ export async function collectAllPages<T>(
   }
 
   return nodes;
-}
-
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, concurrency), items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-        if (index >= items.length) return;
-        results[index] = await mapper(items[index]);
-      }
-    }),
-  );
-
-  return results;
 }
 
 function timestamp(value: Date | string): number {
@@ -222,6 +136,47 @@ export function reconstructDeliverySnapshot(
   };
 }
 
+/** Open tasks accrue lateness today; reviewed/completed tasks stop at delivery. */
+export function resolveTaskSnapshot(
+  current: IssueValuesAtNow & {
+    stateId?: string;
+    stateType?: string;
+    completedAt?: Date | string | null;
+  },
+  history: readonly IssueHistoryEventLike[],
+  reviewStateId: string,
+  now: Date | string,
+): { snapshot: DeliverySnapshot; pending: boolean } | null {
+  if (current.stateType === "canceled" || current.stateType === "duplicate")
+    return null;
+  const pending =
+    current.stateId !== reviewStateId && current.stateType !== "completed";
+  if (pending) {
+    return {
+      snapshot: {
+        deliveredAt: new Date(timestamp(now)).toISOString(),
+        dueDate: current.dueDate ?? null,
+        assigneeId: current.assigneeId ?? null,
+        cycleId: current.cycleId ?? null,
+      },
+      pending: true,
+    };
+  }
+  let snapshot = reconstructDeliverySnapshot(current, history, reviewStateId);
+  if (!snapshot && current.stateType === "completed" && current.completedAt) {
+    // Direct completion still has a delivery date, even without a Review step.
+    snapshot = reconstructDeliverySnapshot(
+      current,
+      [
+        ...history,
+        { createdAt: current.completedAt, toStateId: reviewStateId },
+      ],
+      reviewStateId,
+    );
+  }
+  return snapshot ? { snapshot, pending: false } : null;
+}
+
 /** Explains why an issue associated with a sprint cannot be counted as a delivery. */
 export function getIncompleteSprintReason(
   snapshot: DeliverySnapshot | null,
@@ -237,7 +192,7 @@ export function getIncompleteSprintReason(
 
   if (!isAssociatedWithSprint) return null;
   if (!snapshot)
-    return "No transition into In Review was found in the issue history for this sprint.";
+    return "No transition into In Review was found and no completion timestamp is available for this sprint.";
   if (!snapshot.cycleId)
     return "The sprint at delivery could not be reconstructed from issue history.";
   return null;
@@ -291,285 +246,4 @@ export function getLateBucket(daysLate: number): LateBucket | null {
   if (daysLate <= 3) return "twoThree";
   if (daysLate <= 5) return "fourFive";
   return "overFive";
-}
-
-function emptyCounts(): DeliveryCounts {
-  return { one: 0, twoThree: 0, fourFive: 0, overFive: 0 };
-}
-
-function incrementCount(counts: DeliveryCounts, bucket: LateBucket): void {
-  counts[bucket] += 1;
-}
-
-function userName(user: Pick<User, "name" | "displayName">): string {
-  return user.name.trim() || user.displayName.trim();
-}
-
-function isHumanUser(user: {
-  app?: boolean;
-  isAppUser?: boolean;
-  isBot?: boolean;
-}): boolean {
-  return user.app !== true && user.isAppUser !== true && user.isBot !== true;
-}
-
-async function getTeamIssues(
-  team: Awaited<ReturnType<LinearClient["team"]>>,
-): Promise<Issue[]> {
-  return collectAllPages(
-    await team.issues({ first: PAGE_SIZE, includeArchived: true }),
-  );
-}
-
-async function getIssueHistory(issue: Issue): Promise<IssueHistory[]> {
-  return collectAllPages(
-    await issue.history({
-      first: PAGE_SIZE,
-      includeArchived: true,
-      orderBy: PaginationOrderBy.CreatedAt,
-    }),
-  );
-}
-
-export async function getSprints(): Promise<Sprint[]> {
-  const team = await getLinearClient().team(getTeamId());
-  const cycles = await collectAllPages(
-    await team.cycles({
-      first: PAGE_SIZE,
-      includeArchived: true,
-      orderBy: PaginationOrderBy.CreatedAt,
-    }),
-  );
-
-  return cycles
-    .map((cycle) => ({
-      id: cycle.id,
-      name: cycle.name?.trim() || `Cycle ${cycle.number}`,
-      startsAt: cycle.startsAt.toISOString(),
-      endsAt: cycle.endsAt.toISOString(),
-    }))
-    .sort((left, right) => left.startsAt.localeCompare(right.startsAt));
-}
-
-export async function getDeliveries(sprintId: string): Promise<{
-  students: StudentDeliverySummary[];
-  issues: DeliveryIssue[];
-  incomplete: IncompleteDelivery[];
-}> {
-  if (!sprintId.trim()) throw new Error("Select a sprint.");
-
-  const client = getLinearClient();
-  const team = await client.team(getTeamId());
-  const [issues, members, states] = await Promise.all([
-    getTeamIssues(team),
-    collectAllPages(
-      await team.members({ first: PAGE_SIZE, includeArchived: true }),
-    ),
-    collectAllPages(
-      await team.states({ first: PAGE_SIZE, includeArchived: true }),
-    ),
-  ]);
-  const studentAllowlist = parseStudentAllowlist(
-    process.env.LINEAR_STUDENT_IDS,
-  );
-  const uniqueIssues = [
-    ...new Map(issues.map((issue) => [issue.id, issue])).values(),
-  ];
-  const stateTypes = new Map(states.map((state) => [state.id, state.type]));
-  const roster = new Map<string, StudentDeliverySummary>();
-
-  for (const member of members) {
-    if (
-      !isHumanUser(member) ||
-      !isStudentAllowed(member.id, studentAllowlist)
-    ) {
-      continue;
-    }
-    roster.set(member.id, {
-      id: member.id,
-      name: userName(member),
-      counts: emptyCounts(),
-    });
-  }
-
-  const missingAllowlistedUsers = [...studentAllowlist].filter(
-    (id) => !roster.has(id),
-  );
-  const allowlistedUsers = await mapWithConcurrency(
-    missingAllowlistedUsers,
-    HISTORY_CONCURRENCY,
-    async (id) => {
-      try {
-        return await client.user(id);
-      } catch {
-        return null;
-      }
-    },
-  );
-  for (const user of allowlistedUsers) {
-    if (!user || !isHumanUser(user)) continue;
-    roster.set(user.id, {
-      id: user.id,
-      name: userName(user),
-      counts: emptyCounts(),
-    });
-  }
-
-  const histories = await mapWithConcurrency(
-    uniqueIssues,
-    HISTORY_CONCURRENCY,
-    getIssueHistory,
-  );
-  const eligibleDeliveries: Array<{
-    issue: Issue;
-    snapshot: DeliverySnapshot;
-  }> = [];
-  const incomplete: IncompleteDelivery[] = [];
-  const reviewStateId = getReviewStateId();
-
-  for (let index = 0; index < uniqueIssues.length; index += 1) {
-    const issue = uniqueIssues[index];
-    const history = histories[index];
-    const currentStateType = stateTypes.get(issue.stateId ?? "");
-    if (currentStateType === "canceled" || currentStateType === "duplicate")
-      continue;
-
-    const snapshot = reconstructDeliverySnapshot(
-      {
-        dueDate: issue.dueDate,
-        assigneeId: issue.assigneeId,
-        cycleId: issue.cycleId,
-      },
-      history,
-      reviewStateId,
-    );
-    const assigneeAtDelivery = snapshot
-      ? snapshot.assigneeId
-      : issue.assigneeId;
-    if (
-      assigneeAtDelivery &&
-      !isStudentAllowed(assigneeAtDelivery, studentAllowlist)
-    ) {
-      continue;
-    }
-
-    const missingSprintReason = getIncompleteSprintReason(
-      snapshot,
-      issue.cycleId,
-      history,
-      sprintId,
-    );
-    if (missingSprintReason) {
-      incomplete.push({
-        identifier: issue.identifier,
-        reason: missingSprintReason,
-      });
-      continue;
-    }
-    if (!snapshot || snapshot.cycleId !== sprintId) continue;
-
-    eligibleDeliveries.push({ issue, snapshot });
-  }
-
-  const historicAssigneeIds = [
-    ...new Set(
-      eligibleDeliveries
-        .map(({ snapshot }) => snapshot.assigneeId)
-        .filter((id): id is string => Boolean(id) && !roster.has(id!))
-        .filter((id) => isStudentAllowed(id, studentAllowlist)),
-    ),
-  ];
-  const historicUsers = await mapWithConcurrency(
-    historicAssigneeIds,
-    HISTORY_CONCURRENCY,
-    async (id) => {
-      try {
-        return await client.user(id);
-      } catch {
-        return null;
-      }
-    },
-  );
-  for (const user of historicUsers) {
-    if (!user || !isHumanUser(user)) continue;
-    roster.set(user.id, {
-      id: user.id,
-      name: userName(user),
-      counts: emptyCounts(),
-    });
-  }
-
-  const results = eligibleDeliveries.map(({ issue, snapshot }) => {
-    const reasons: string[] = [];
-    if (!snapshot.dueDate || !isValidCalendarDate(snapshot.dueDate)) {
-      reasons.push("No valid due date was set at delivery.");
-    }
-
-    const student = snapshot.assigneeId
-      ? roster.get(snapshot.assigneeId)
-      : undefined;
-    if (!snapshot.assigneeId) {
-      reasons.push("No assignee was set at delivery.");
-    } else if (!student) {
-      reasons.push(
-        "The assignee at delivery is not a human team member or could not be resolved.",
-      );
-    }
-
-    if (reasons.length > 0 || !snapshot.dueDate || !student) {
-      return {
-        issue: null,
-        incomplete: { identifier: issue.identifier, reason: reasons.join(" ") },
-      };
-    }
-
-    let daysLate: number;
-    try {
-      daysLate = calculateDaysLate(snapshot.dueDate, snapshot.deliveredAt);
-    } catch {
-      return {
-        issue: null,
-        incomplete: {
-          identifier: issue.identifier,
-          reason: "Delivery timestamp or due date could not be interpreted.",
-        },
-      };
-    }
-
-    const bucket = getLateBucket(daysLate);
-    if (!bucket) return { issue: null, incomplete: null };
-
-    incrementCount(student.counts, bucket);
-
-    return {
-      issue: {
-        id: issue.id,
-        identifier: issue.identifier,
-        title: issue.title,
-        url: issue.url,
-        studentId: student.id,
-        studentName: student.name,
-        deliveredAt: snapshot.deliveredAt,
-        dueDate: snapshot.dueDate,
-        daysLate,
-        bucket,
-      },
-      incomplete: null,
-    };
-  });
-
-  return {
-    students: [...roster.values()].sort(
-      (left, right) =>
-        left.name.localeCompare(right.name, "en", { sensitivity: "base" }) ||
-        left.id.localeCompare(right.id),
-    ),
-    issues: results.flatMap((result) => (result.issue ? [result.issue] : [])),
-    incomplete: [
-      ...incomplete,
-      ...results.flatMap((result) =>
-        result.incomplete ? [result.incomplete] : [],
-      ),
-    ],
-  };
 }

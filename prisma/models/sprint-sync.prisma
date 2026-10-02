@@ -1,0 +1,4 @@
+model SprintSync {
+  sprintId     String    @id
+  lastSyncedAt DateTime?
+}

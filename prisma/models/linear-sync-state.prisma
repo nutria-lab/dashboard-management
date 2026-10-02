@@ -1,0 +1,12 @@
+model LinearSyncState {
+  teamId             String    @id
+  leaseOwner         String?
+  leaseUntil         DateTime?
+  retryAt            DateTime?
+  lastError          String?
+  bootstrapCursor    String?
+  bootstrapListed    Boolean   @default(false)
+  bootstrapComplete  Boolean   @default(false)
+  metadataSyncedAt   DateTime?
+  openStateIds       String[]  @default([])
+}

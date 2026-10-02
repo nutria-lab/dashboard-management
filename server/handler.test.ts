@@ -116,6 +116,81 @@ describe("dashboard HTTP flow", () => {
       (await (await request("/attendance?sprintId=demo-2")).json()).records,
     ).toHaveLength(0);
   });
+  it("persists justifications, excludes tasks from counts, edits and restores accountability", async () => {
+    const get = async () =>
+      (await request("/deliveries?sprintId=demo-2")).json();
+    const before = await get();
+    const issueId = before.issues[0].id;
+    const input = {
+      issueId,
+      reason: "LINEAR_ERROR",
+      explanation: "Incorrect due date in Linear.",
+    };
+    expect(
+      (await request("/justifications", "POST", input, false)).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(
+          "/justifications",
+          "POST",
+          input,
+          true,
+          "https://evil.test",
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request("/justifications", "POST", {
+          ...input,
+          explanation: "   ",
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/justifications", "POST", {
+          ...input,
+          reason: "INVALID",
+        })
+      ).status,
+    ).toBe(400);
+    expect((await request("/justifications", "POST", input)).status).toBe(200);
+    const after = await get();
+    expect(after.students[0].counts.one).toBe(
+      before.students[0].counts.one - 1,
+    );
+    expect(after.issues.some((i: { id: string }) => i.id === issueId)).toBe(
+      false,
+    );
+    expect(after.justified).toHaveLength(1);
+    expect(after.justified[0].justification.explanation).toBe(
+      input.explanation,
+    );
+    expect(
+      (
+        await request("/justifications", "POST", {
+          ...input,
+          reason: "DEPENDENCY",
+          explanation: "Blocked by another student.",
+        })
+      ).status,
+    ).toBe(200);
+    const edited = await get();
+    expect(edited.justified).toHaveLength(1);
+    expect(edited.justified[0].justification.reason).toBe("DEPENDENCY");
+    expect(edited.students[0].counts.one).toBe(after.students[0].counts.one);
+    expect(
+      (await request("/justifications?issueId=" + issueId, "DELETE")).status,
+    ).toBe(200);
+    expect(
+      (await request("/justifications?issueId=" + issueId, "DELETE")).status,
+    ).toBe(200);
+    const restored = await get();
+    expect(restored.students).toEqual(before.students);
+    expect(restored.justified).toEqual([]);
+  });
   it("logs out and rejects the expired session", async () => {
     const response = await request("/session", "DELETE");
     cookie = response.headers.get("set-cookie")!.split(";")[0];

@@ -241,6 +241,60 @@ dialog .muted {
 dialog label {
   margin-bottom: 16px;
 }
+.justification-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 200px;
+  max-width: 420px;
+}
+.justification-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.justified-tasks {
+  margin-top: 20px;
+}
+.sync-panel,
+.initial-import {
+  border: 1px solid #e6e1d9;
+  border-radius: 7px;
+  padding: 18px 22px;
+  margin-bottom: 16px;
+  background: #fbfaf7;
+}
+.sync-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.sync-panel h2,
+.initial-import h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+.sync-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+}
+.sync-details p,
+.sync-retry,
+.initial-import p {
+  margin: 0;
+  color: #626661;
+  font-size: 14px;
+}
+.sync-retry {
+  margin-top: 8px;
+}
+.sync-panel .error {
+  margin: 8px 0 0;
+}
+.initial-import {
+  padding: 24px;
+}
 @media (min-width: 1600px) {
   header {
     padding-left: calc((100vw - 1472px) / 2);
@@ -375,6 +429,11 @@ dialog label {
   }
   .register .actions button {
     padding: 8px;
+  }
+  .sync-panel {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px 16px;
   }
 }
 .demo-badge {

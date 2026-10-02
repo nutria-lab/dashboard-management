@@ -1,0 +1,12 @@
+model WebhookEvent {
+  deliveryId  String    @id
+  issueId     String
+  teamId      String
+  action      String
+  eventAt     DateTime
+  payload     Json
+  processedAt DateTime?
+  error       String?
+
+  @@index([teamId, processedAt])
+}

@@ -1,5 +1,7 @@
 model Sprint {
   id       String         @id
   name     String
+  startsAt DateTime?
+  endsAt   DateTime?
   sessions ClassSession[]
 }

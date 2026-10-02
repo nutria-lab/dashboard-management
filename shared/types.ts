@@ -4,6 +4,15 @@ export type Sprint = {
   startsAt: string;
   endsAt: string;
 };
+export type SyncStatus = {
+  lastSyncedAt: string | null;
+  retryAt: string | null;
+  syncing: boolean;
+  pendingEvents: number;
+  importComplete: boolean;
+  webhookConfigured: boolean;
+  error: string | null;
+};
 export type Student = { id: string; name: string };
 export type Counts = {
   one: number;
@@ -18,7 +27,9 @@ export type Delivery = {
   url: string;
   studentId: string;
   studentName: string;
-  deliveredAt: string;
+  deliveredAt: string | null;
+  status: string;
+  pending: boolean;
   dueDate: string;
   daysLate: number;
   bucket: string;
@@ -27,6 +38,20 @@ export type Deliveries = {
   students: (Student & { counts: Counts })[];
   issues: Delivery[];
   incomplete: { identifier: string; reason: string }[];
+  justified: (Delivery & { justification: TaskJustification })[];
+};
+export const justificationReasons = {
+  LINEAR_ERROR: "Linear error",
+  DEPENDENCY: "Dependency on another person's task",
+  OTHER: "Other justified exception",
+} as const;
+export type JustificationReason = keyof typeof justificationReasons;
+export type TaskJustification = {
+  issueId: string;
+  reason: JustificationReason;
+  explanation: string;
+  createdAt: string;
+  updatedAt: string;
 };
 export const categories = {
   PRESENT: "Present",

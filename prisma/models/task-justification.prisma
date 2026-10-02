@@ -1,0 +1,13 @@
+enum TaskJustificationReason {
+  LINEAR_ERROR
+  DEPENDENCY
+  OTHER
+}
+
+model TaskJustification {
+  issueId     String                   @id
+  reason      TaskJustificationReason
+  explanation String                   @db.Text
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+}
