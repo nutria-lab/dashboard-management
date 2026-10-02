@@ -765,8 +765,8 @@ function App() {
             <label htmlFor="login-role">
               Access
               <select id="login-role" name="role" defaultValue="teacher">
-                <option value="teacher">Teacher</option>
-                <option value="student">Student</option>
+                <option value="teacher">LAB IV</option>
+                <option value="student">LAB II</option>
               </select>
             </label>
             <label htmlFor="login-password">

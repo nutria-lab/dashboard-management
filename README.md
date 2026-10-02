@@ -32,7 +32,7 @@ The UI runs on http://localhost:5173; /api is proxied to the local Node server o
 
 ## Student access
 
-Choose **Teacher** or **Student** on the sign-in screen. Student access uses `STUDENT_DASHBOARD_PASSWORD`, shows **Read-only**, and permits viewing all students, sprints, deliveries, justifications and attendance. Students cannot change records or trigger synchronization, including through direct API requests. Teacher access continues using `DASHBOARD_PASSWORD`.
+Choose **LAB IV** for administrator access or **LAB II** for read-only student access on the sign-in screen. Student access uses `STUDENT_DASHBOARD_PASSWORD`, shows **Read-only**, and permits viewing all students, sprints, deliveries, justifications and attendance. Students cannot change records or trigger synchronization, including through direct API requests. Teacher access continues using `DASHBOARD_PASSWORD`.
 
 Students read Neon every thirty seconds while the page is visible. Periodic Linear synchronization and its manual button are teacher-only; webhooks can continue updating Neon independently. Sessions carry a signed role and expire after eight hours. Rotating a role's password invalidates its sessions. Existing sessions issued before role support require signing in again. Identical configured teacher/student passwords disable login rather than granting elevated access.
 
