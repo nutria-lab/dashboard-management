@@ -1,3 +1,9 @@
+export type SessionRole = "teacher" | "student";
+export type SessionInfo = {
+  authenticated: boolean;
+  role: SessionRole | null;
+  demo: boolean;
+};
 export type Sprint = {
   id: string;
   name: string;

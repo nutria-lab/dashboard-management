@@ -2,7 +2,8 @@ import "dotenv/config";
 import { consumeLoginAttempt, resetLoginAttempts } from "./login-limiter.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  authenticated,
+  sessionRole,
+  rolePassword,
   hashClientKey,
   constantEqual,
   sameOrigin,
@@ -106,7 +107,11 @@ export default async function handler(
       return send(403, { error: "Request origin rejected." });
     if (route === "/api/session") {
       if (method === "GET")
-        return send(200, { authenticated: authenticated(req), demo: demo() });
+        return send(200, {
+          authenticated: sessionRole(req) !== null,
+          role: sessionRole(req),
+          demo: demo(),
+        });
       if (method === "DELETE") {
         setSession(res, true);
         return send(200, { ok: true });
@@ -123,21 +128,33 @@ export default async function handler(
           error: "Too many sign-in attempts. Try again in 15 minutes.",
         });
       const input = await body(req);
-      if (!process.env.DASHBOARD_PASSWORD)
+      const role = input?.role ?? "teacher";
+      if (role !== "teacher" && role !== "student")
+        return send(400, { error: "Invalid access role." });
+      const password = rolePassword(role);
+      if (!password)
+        return send(503, { error: "This access role is not configured." });
+      if (
+        rolePassword("student") &&
+        rolePassword("student") === rolePassword("teacher")
+      )
         return send(503, {
-          error: "Set DASHBOARD_PASSWORD and SESSION_SECRET on the server.",
+          error: "Student and teacher passwords must be different.",
         });
       if (
         !input ||
         typeof input.password !== "string" ||
-        !constantEqual(input.password, process.env.DASHBOARD_PASSWORD)
+        !constantEqual(input.password, password)
       )
         return send(401, { error: "Incorrect password." });
       await resetLoginAttempts(key);
-      setSession(res);
-      return send(200, { ok: true });
+      setSession(res, false, role);
+      return send(200, { ok: true, role });
     }
-    if (!authenticated(req)) return send(401, { error: "Please sign in." });
+    const role = sessionRole(req);
+    if (!role) return send(401, { error: "Please sign in." });
+    if (role === "student" && method !== "GET")
+      return send(403, { error: "Student access is read-only." });
     const sprintId = url.searchParams.get("sprintId");
     if (route === "/api/sync") {
       if (method !== "GET" && method !== "POST")

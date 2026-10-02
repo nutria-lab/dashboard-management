@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { SessionRole } from "../shared/types.js";
 const COOKIE = "lab_session";
 const maxAge = 8 * 60 * 60;
 function secret() {
@@ -8,9 +9,14 @@ function secret() {
     throw new Error("Set SESSION_SECRET to at least 32 random characters.");
   return value;
 }
-function sign(value: string) {
+export function rolePassword(role: SessionRole) {
+  return role === "teacher"
+    ? process.env.DASHBOARD_PASSWORD
+    : process.env.STUDENT_DASHBOARD_PASSWORD;
+}
+function sign(value: string, role: SessionRole) {
   return createHmac("sha256", secret())
-    .update(process.env.DASHBOARD_PASSWORD ?? "")
+    .update(rolePassword(role) ?? "")
     .update(value)
     .digest("base64url");
 }
@@ -19,15 +25,16 @@ export function constantEqual(a: string, b: string) {
   const second = createHmac("sha256", secret()).update(b).digest();
   return timingSafeEqual(first, second);
 }
-export function authenticated(req: IncomingMessage) {
+export function sessionRole(req: IncomingMessage): SessionRole | null {
   const token = req.headers.cookie
     ?.split(";")
     .map((c) => c.trim())
     .find((c) => c.startsWith(`${COOKIE}=`))
     ?.slice(COOKIE.length + 1);
-  if (!token) return false;
-  const [expires, nonce, signature, extra] = token.split(".");
+  if (!token) return null;
+  const [role, expires, nonce, signature, extra] = token.split(".");
   if (
+    (role !== "teacher" && role !== "student") ||
     extra ||
     !expires ||
     !nonce ||
@@ -35,14 +42,26 @@ export function authenticated(req: IncomingMessage) {
     !/^\d+$/.test(expires) ||
     Number(expires) <= Date.now()
   )
-    return false;
-  return constantEqual(signature, sign(`${expires}.${nonce}`));
+    return null;
+  if (!rolePassword(role)) return null;
+  if (role === "student" && rolePassword(role) === rolePassword("teacher"))
+    return null;
+  return constantEqual(signature, sign(`${role}.${expires}.${nonce}`, role))
+    ? role
+    : null;
 }
-export function setSession(res: ServerResponse, logout = false) {
-  const value = `${Date.now() + maxAge * 1000}.${randomBytes(16).toString("hex")}`;
+export function authenticated(req: IncomingMessage) {
+  return sessionRole(req) !== null;
+}
+export function setSession(
+  res: ServerResponse,
+  logout = false,
+  role: SessionRole = "teacher",
+) {
+  const value = `${role}.${Date.now() + maxAge * 1000}.${randomBytes(16).toString("hex")}`;
   res.setHeader(
     "Set-Cookie",
-    `${COOKIE}=${logout ? "" : `${value}.${sign(value)}`}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${logout ? 0 : maxAge}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`,
+    `${COOKIE}=${logout ? "" : `${value}.${sign(value, role)}`}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${logout ? 0 : maxAge}${process.env.NODE_ENV === "production" ? "; Secure" : ""}`,
   );
 }
 export function sameOrigin(req: IncomingMessage) {

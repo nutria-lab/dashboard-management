@@ -18,6 +18,7 @@ Fill .env:
 - DATABASE_URL: Neon pooled PostgreSQL URL with SSL parameters.
 - DIRECT_URL: Neon direct PostgreSQL URL for migration commands.
 - DASHBOARD_PASSWORD: the shared teacher password.
+- STUDENT_DASHBOARD_PASSWORD: the shared read-only student password; it must differ from the teacher password. Leave unset to disable student sign-in.
 - SESSION_SECRET: at least 32 random characters. Generate with openssl rand -hex 32.
 
 Then:
@@ -28,6 +29,14 @@ Then:
     npm run dev
 
 The UI runs on http://localhost:5173; /api is proxied to the local Node server on port 3001. Migrations are applied only when you run the migration command. The build generates Prisma and does not migrate any database.
+
+## Student access
+
+Choose **Teacher** or **Student** on the sign-in screen. Student access uses `STUDENT_DASHBOARD_PASSWORD`, shows **Read-only**, and permits viewing all students, sprints, deliveries, justifications and attendance. Students cannot change records or trigger synchronization, including through direct API requests. Teacher access continues using `DASHBOARD_PASSWORD`.
+
+Students read Neon every thirty seconds while the page is visible. Periodic Linear synchronization and its manual button are teacher-only; webhooks can continue updating Neon independently. Sessions carry a signed role and expire after eight hours. Rotating a role's password invalidates its sessions. Existing sessions issued before role support require signing in again. Identical configured teacher/student passwords disable login rather than granting elevated access.
+
+Set `STUDENT_DASHBOARD_PASSWORD` in Vercel for each desired deployment environment and redeploy. No database migration is needed. Never prefix this variable with `VITE_` or commit its value.
 
 ## Delivery rules
 

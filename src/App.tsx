@@ -24,6 +24,8 @@ import type {
   Student,
   Delivery,
   SyncStatus,
+  SessionRole,
+  SessionInfo,
   TaskJustification,
 } from "../shared/types";
 import "./App.css";
@@ -57,12 +59,14 @@ function SyncStatusPanel({
   syncing,
   retryBlocked,
   onSync,
+  canEdit,
 }: {
   status: SyncStatus | null;
   error: string | null;
   syncing: boolean;
   retryBlocked: boolean;
   onSync: () => void;
+  canEdit: boolean;
 }) {
   return (
     <section className="sync-panel" aria-labelledby="sync-status-title">
@@ -106,9 +110,11 @@ function SyncStatusPanel({
           </p>
         )}
       </div>
-      <button disabled={syncing || retryBlocked} onClick={onSync}>
-        {syncing ? "Syncing…" : "Sync now"}
-      </button>
+      {canEdit && (
+        <button disabled={syncing || retryBlocked} onClick={onSync}>
+          {syncing ? "Syncing…" : "Sync now"}
+        </button>
+      )}
     </section>
   );
 }
@@ -304,6 +310,8 @@ function AttendanceForm({
 }
 function App() {
   const [auth, setAuth] = useState<boolean | null>(null);
+  const [role, setRole] = useState<SessionRole | null>(null);
+  const canEdit = role === "teacher";
   const [demo, setDemo] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -415,11 +423,12 @@ function App() {
   );
   useEffect(() => {
     const c = new AbortController();
-    api<{ authenticated: boolean; demo: boolean }>("/session", {
+    api<SessionInfo>("/session", {
       signal: c.signal,
     })
       .then((s) => {
         setAuth(s.authenticated);
+        setRole(s.role);
         setDemo(s.demo);
       })
       .catch((e) => {
@@ -480,7 +489,7 @@ function App() {
   }, [auth, sprintId, reload]);
 
   useEffect(() => {
-    if (!auth || !sprintId) return;
+    if (!auth || !canEdit || !sprintId) return;
     let active = true;
     void requestSync(sprintId)
       .catch(() => undefined)
@@ -490,10 +499,10 @@ function App() {
     return () => {
       active = false;
     };
-  }, [auth, sprintId, requestSync, refreshDatabaseData]);
+  }, [auth, canEdit, sprintId, requestSync, refreshDatabaseData]);
 
   useEffect(() => {
-    if (!auth || !sprintId) return;
+    if (!auth || !canEdit || !sprintId) return;
     let interval: number | undefined;
     const scheduleWhileVisible = () => {
       if (interval !== undefined) window.clearInterval(interval);
@@ -515,7 +524,7 @@ function App() {
       document.removeEventListener("visibilitychange", scheduleWhileVisible);
       if (interval !== undefined) window.clearInterval(interval);
     };
-  }, [auth, sprintId, requestSync]);
+  }, [auth, canEdit, sprintId, requestSync]);
 
   useEffect(() => {
     if (!auth || !sprintId) return;
@@ -533,18 +542,26 @@ function App() {
       const pollController = new AbortController();
       controller = pollController;
       const query = "?sprintId=" + encodeURIComponent(sprintId);
-      const [deliveriesResult, statusResult] = await Promise.allSettled([
-        api<Deliveries>("/deliveries" + query, {
-          signal: pollController.signal,
-        }),
-        api<SyncStatus>("/sync" + query, {
-          signal: pollController.signal,
-        }),
-      ]);
+      const [deliveriesResult, statusResult, attendanceResult] =
+        await Promise.allSettled([
+          api<Deliveries>("/deliveries" + query, {
+            signal: pollController.signal,
+          }),
+          api<SyncStatus>("/sync" + query, {
+            signal: pollController.signal,
+          }),
+          api<Attendance>("/attendance" + query, {
+            signal: pollController.signal,
+          }),
+        ]);
       if (active && !pollController.signal.aborted) {
         if (deliveriesResult.status === "fulfilled") {
           setDeliveries(deliveriesResult.value);
           setDeliveryError("");
+        }
+        if (attendanceResult.status === "fulfilled") {
+          setAttendance(attendanceResult.value);
+          setAttendanceError("");
         }
         if (statusResult.status === "fulfilled") {
           setSyncStatuses((current) => ({
@@ -575,7 +592,7 @@ function App() {
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    scheduleWhileVisible();
+    scheduleWhileVisible(true);
     return () => {
       active = false;
       stopInterval();
@@ -600,14 +617,16 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      await api("/session", {
+      const session = await api<{ role: SessionRole }>("/session", {
         method: "POST",
         body: JSON.stringify({
           password: new FormData(e.currentTarget).get("password"),
+          role: new FormData(e.currentTarget).get("role"),
         }),
       });
       setSprintsLoading(true);
       setLoading(true);
+      setRole(session.role);
       setAuth(true);
     } catch (e) {
       setError((e as Error).message);
@@ -619,6 +638,9 @@ function App() {
     try {
       await api("/session", { method: "DELETE" });
       setAuth(false);
+      setRole(null);
+      setForm(null);
+      setJustificationForm(null);
       setSprints([]);
       setSprintId("");
       setDeliveries(null);
@@ -681,7 +703,7 @@ function App() {
   const retryBlocked = !!retryAt && retryAt.getTime() > Date.now();
   const syncing = syncingSprintIds.has(sprintId) || !!syncStatus?.syncing;
   const syncNow = () => {
-    if (!sprintId || syncing || retryBlocked) return;
+    if (!canEdit || !sprintId || syncing || retryBlocked) return;
     void requestSync(sprintId)
       .then(() => refreshDatabaseData(sprintId))
       .catch(() => undefined);
@@ -721,6 +743,9 @@ function App() {
               year: "numeric",
             }).format(today)}
           </time>
+          {auth && role === "student" && (
+            <span className="demo-badge">Read-only</span>
+          )}
           {auth && (
             <button className="quiet" onClick={logout}>
               Sign out
@@ -737,9 +762,17 @@ function App() {
           <h1>Welcome back</h1>
           <p>Sign in to review deliveries and attendance.</p>
           <form onSubmit={login}>
-            <label>
-              Teacher password
+            <label htmlFor="login-role">
+              Access
+              <select id="login-role" name="role" defaultValue="teacher">
+                <option value="teacher">Teacher</option>
+                <option value="student">Student</option>
+              </select>
+            </label>
+            <label htmlFor="login-password">
+              Password
               <input
+                id="login-password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
@@ -762,7 +795,9 @@ function App() {
               <p>
                 {tab === "deliveries"
                   ? "Review overdue pending tasks and late deliveries by sprint and student."
-                  : "Record class attendance and review participation by sprint."}
+                  : canEdit
+                    ? "Record class attendance and review participation by sprint."
+                    : "Review class attendance and participation by sprint."}
               </p>
             </div>
             <label className="sprint-label">
@@ -811,6 +846,7 @@ function App() {
                 syncing={syncing}
                 retryBlocked={retryBlocked}
                 onSync={syncNow}
+                canEdit={canEdit}
               />
               {loading && <p role="status">Loading sprint data…</p>}
               {tab === "deliveries" && (
@@ -941,7 +977,7 @@ function App() {
                                 <th>Status</th>
                                 <th>Delivered</th>
                                 <th>Days late</th>
-                                <th>Accountability</th>
+                                {canEdit && <th>Accountability</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -968,16 +1004,18 @@ function App() {
                                       : "Pending · through today"}
                                   </td>
                                   <td>{i.daysLate}</td>
-                                  <td>
-                                    <button
-                                      className="quiet"
-                                      onClick={() =>
-                                        setJustificationForm({ task: i })
-                                      }
-                                    >
-                                      Justify {i.identifier}
-                                    </button>
-                                  </td>
+                                  {canEdit && (
+                                    <td>
+                                      <button
+                                        className="quiet"
+                                        onClick={() =>
+                                          setJustificationForm({ task: i })
+                                        }
+                                      >
+                                        Justify {i.identifier}
+                                      </button>
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>
@@ -1007,7 +1045,7 @@ function App() {
                               <th>Student</th>
                               <th>Reason</th>
                               <th>Explanation</th>
-                              <th>Actions</th>
+                              {canEdit && <th>Actions</th>}
                             </tr>
                           </thead>
                           <tbody>
@@ -1030,31 +1068,35 @@ function App() {
                                 <td className="justification-text">
                                   {i.justification.explanation}
                                 </td>
-                                <td>
-                                  <div className="justification-actions">
-                                    <button
-                                      className="quiet"
-                                      disabled={!!removingJustification}
-                                      onClick={() =>
-                                        setJustificationForm({
-                                          task: i,
-                                          record: i.justification,
-                                        })
-                                      }
-                                    >
-                                      Edit {i.identifier}
-                                    </button>
-                                    <button
-                                      className="quiet"
-                                      disabled={!!removingJustification}
-                                      onClick={() => removeJustification(i.id)}
-                                    >
-                                      {removingJustification === i.id
-                                        ? "Removing…"
-                                        : `Remove justification ${i.identifier}`}
-                                    </button>
-                                  </div>
-                                </td>
+                                {canEdit && (
+                                  <td>
+                                    <div className="justification-actions">
+                                      <button
+                                        className="quiet"
+                                        disabled={!!removingJustification}
+                                        onClick={() =>
+                                          setJustificationForm({
+                                            task: i,
+                                            record: i.justification,
+                                          })
+                                        }
+                                      >
+                                        Edit {i.identifier}
+                                      </button>
+                                      <button
+                                        className="quiet"
+                                        disabled={!!removingJustification}
+                                        onClick={() =>
+                                          removeJustification(i.id)
+                                        }
+                                      >
+                                        {removingJustification === i.id
+                                          ? "Removing…"
+                                          : `Remove justification ${i.identifier}`}
+                                      </button>
+                                    </div>
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -1101,12 +1143,16 @@ function App() {
                       Swipe the table to see all categories.
                     </p>
                   </div>
-                  <button
-                    disabled={!sprint || !students.length || !!attendanceError}
-                    onClick={() => setForm({})}
-                  >
-                    Record attendance
-                  </button>
+                  {canEdit && (
+                    <button
+                      disabled={
+                        !sprint || !students.length || !!attendanceError
+                      }
+                      onClick={() => setForm({})}
+                    >
+                      Record attendance
+                    </button>
+                  )}
                 </div>
                 {attendanceError ? (
                   <p role="alert" className="error">
@@ -1179,7 +1225,7 @@ function App() {
                             <th>Student</th>
                             <th>Attendance</th>
                             <th>Notes</th>
-                            <th>Actions</th>
+                            {canEdit && <th>Actions</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -1220,37 +1266,39 @@ function App() {
                                     </small>
                                   )}
                                 </td>
-                                <td className="actions">
-                                  <button
-                                    className="quiet"
-                                    onClick={() => setForm({ record: r })}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="quiet danger"
-                                    onClick={() => setDeleting(r.id)}
-                                  >
-                                    Delete
-                                  </button>
-                                  {deleting === r.id && (
-                                    <span>
-                                      Delete this record?{" "}
-                                      <button
-                                        className="danger"
-                                        onClick={() => removeRecord(r.id)}
-                                      >
-                                        Confirm
-                                      </button>
-                                      <button
-                                        className="quiet"
-                                        onClick={() => setDeleting(null)}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </span>
-                                  )}
-                                </td>
+                                {canEdit && (
+                                  <td className="actions">
+                                    <button
+                                      className="quiet"
+                                      onClick={() => setForm({ record: r })}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="quiet danger"
+                                      onClick={() => setDeleting(r.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                    {deleting === r.id && (
+                                      <span>
+                                        Delete this record?{" "}
+                                        <button
+                                          className="danger"
+                                          onClick={() => removeRecord(r.id)}
+                                        >
+                                          Confirm
+                                        </button>
+                                        <button
+                                          className="quiet"
+                                          onClick={() => setDeleting(null)}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -1259,13 +1307,13 @@ function App() {
                     </div>
                   ) : (
                     <p className="empty">
-                      No attendance recorded for this sprint. Add the first
-                      class record above.
+                      No attendance recorded for this sprint.
+                      {canEdit && " Add the first class record above."}
                     </p>
                   )}
                 </section>
               )}
-              {form && sprint && (
+              {canEdit && form && sprint && (
                 <AttendanceForm
                   key={form.record?.id ?? "new"}
                   students={students}
@@ -1276,7 +1324,7 @@ function App() {
                   onSave={refresh}
                 />
               )}
-              {justificationForm && (
+              {canEdit && justificationForm && (
                 <JustificationForm
                   key={justificationForm.task.id}
                   task={justificationForm.task}
